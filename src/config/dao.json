@@ -1,0 +1,13 @@
+{
+  "default": {
+    "connections": {
+      "main": {
+        "type": "mongodb",
+        "url": "mongodb://localhost:27017/",
+        "database": "sensible_ft"
+      }
+    },
+    "daosPath": "dao",
+    "reloadDaos": false
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "default": {
+    "wif": "cN2gor4vF2eQ1PmzTzJEwps6uvTK4QToUgTxGHN1xUxZ34djL8vR",
+    "apiTarget": "whatsonchain",
+    "network": "testnet",
+    "feeb": 0.5,
+    "tokenApiPrefix": "http://127.0.0.1:8091"
+  },
+  "production": {
+    "wif": "",
+    "apiTarget": "metasv",
+    "network": "mainnet",
+    "feeb": 0.5,
+    "tokenApiPrefix": "http://127.0.0.1:8091"
+  }
+}
