@@ -193,7 +193,7 @@ class FtMgr {
    */
   static async transfer(genesisId, senderWif, receivers) {
     const utxoPrivateKey = this.privateKey;
-    const utxoAddress = utxoPrivateKey.toAddress(this.net);
+    const utxoAddress = utxoPrivateKey.toAddress(this.network);
 
     const senderPrivateKey = new bsv.PrivateKey.fromWIF(senderWif);
     const senderPublicKey = bsv.PublicKey.fromPrivateKey(senderPrivateKey);
@@ -294,7 +294,7 @@ class FtMgr {
       senderPk: toHex(senderPublicKey),
       receivers,
       ftUtxos,
-      routeCheckType: ROUTE_CHECK_TYPE_3To3,
+      routeCheckType,
       routeCheckHex: routeCheckTx.serialize(),
       oracleSelecteds: [0, 1],
 
