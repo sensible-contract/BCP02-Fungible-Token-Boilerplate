@@ -15,6 +15,7 @@ const ErrCode = {
   EC_NFT_NOT_EXISTED: -10003,
   EC_INSUFFICIENT_UTXO: -10004,
   EC_TOO_LONG_MEMPOOL_CHAI: -10005,
+  EC_TRY_AGAIN_LAYER: -10006,
 };
 
 module.exports = {

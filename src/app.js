@@ -35,9 +35,11 @@ var app = exports.app;
 
     app.http.start();
 
-    const { FtMgr } = require("./domain/FtMgr");
     app.loadConfig("ftConfig", require("./config/ft.json"));
-    FtMgr.init(app.get("ftConfig"));
+    let ftConfig = app.get("ftConfig");
+
+    const { FtMgr } = require("./domain/FtMgr");
+    FtMgr.init(ftConfig);
 
     console.log("start completed");
   } catch (e) {

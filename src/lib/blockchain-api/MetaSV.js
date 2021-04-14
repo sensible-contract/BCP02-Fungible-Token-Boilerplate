@@ -40,7 +40,7 @@ class MetaSV {
    * @param {string} hex
    */
   async broadcast(hex) {
-    let _res = await Net.httpPost(`${this.serverBase}/tx/broadcast`, {
+    let _res = await Net.httpPost(`${this.serverBase}/merchant/broadcast`, {
       hex,
     });
     return _res.txid;

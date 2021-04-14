@@ -1,16 +1,33 @@
 {
   "default": {
-    "wif": "cN2gor4vF2eQ1PmzTzJEwps6uvTK4QToUgTxGHN1xUxZ34djL8vR",
-    "apiTarget": "whatsonchain",
-    "network": "testnet",
-    "feeb": 0.5,
-    "tokenApiPrefix": "http://127.0.0.1:8091"
-  },
-  "production": {
-    "wif": "",
+    "feeWallets": [
+      {
+        "addressBy": "",
+        "wif": "",
+        "unitSatoshis": 100000
+      }
+    ],
     "apiTarget": "metasv",
     "network": "mainnet",
     "feeb": 0.5,
-    "tokenApiPrefix": "http://127.0.0.1:8091"
+    "tokenApiPrefix": "http://127.0.0.1:8093"
+  },
+  "production": {
+    "feeWallets": [
+      {
+        "addressBy": "",
+        "wif": "",
+        "unitSatoshis": 100000
+      },
+      {
+        "addressBy": "1JRFMVDEj7eytH6Mk6ymnC7m24umJBGxKX",
+        "wif": "",
+        "unitSatoshis": 1000000
+      }
+    ],
+    "apiTarget": "metasv",
+    "network": "mainnet",
+    "feeb": 0.5,
+    "tokenApiPrefix": "http://127.0.0.1:8093"
   }
 }

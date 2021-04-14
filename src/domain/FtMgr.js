@@ -5,18 +5,52 @@ const { FungibleTokenDao } = require("../dao/FungibleTokenDao");
 const { Net } = require("../lib/net");
 const { BlockChainApi } = require("../lib/blockchain-api");
 const { genSignedTx } = require("./sig");
+const { FeeWallt } = require("./FeeWallt");
 const ROUTE_CHECK_TYPE_3To3 = "3To3";
 const ROUTE_CHECK_TYPE_6To6 = "6To6";
 const ROUTE_CHECK_TYPE_10To10 = "10To10";
 const ROUTE_CHECK_TYPE_3To100 = "3To100";
 const ROUTE_CHECK_TYPE_20To3 = "20To3";
+
+const SIZE_OF_TOKEN = 7367;
+const SIZE_OF_ROUTE_CHECK_TYPE_3To3 = 6362;
+const SIZE_OF_ROUTE_CHECK_TYPE_6To6 = 10499;
+const SIZE_OF_ROUTE_CHECK_TYPE_10To10 = 16015;
+const SIZE_OF_ROUTE_CHECK_TYPE_3To100 = 52244;
+const SIZE_OF_ROUTE_CHECK_TYPE_20To3 = 21765;
+const BASE_UTXO_FEE = 1000;
+const BASE_FEE = 52416;
 class FtMgr {
-  static init({ network, wif, apiTarget, tokenApiPrefix, feeb }) {
+  static init({ network, apiTarget, tokenApiPrefix, feeb, feeWallets }) {
     this.network = network;
-    this.privateKey = new bsv.PrivateKey.fromWIF(wif);
     this.blockChainApi = new BlockChainApi(apiTarget, network);
     this.tokenApiPrefix = tokenApiPrefix;
     this.feeb = feeb;
+    this.feeWalletMap = {};
+    feeWallets.forEach((v) => {
+      this.feeWalletMap[v.addressBy] = new FeeWallt({
+        network,
+        apiTarget,
+        feeb,
+        wif: v.wif,
+        unitSatoshis: v.unitSatoshis,
+      });
+      if (!v.addressBy) {
+        this.defaultFeeWallet = this.feeWalletMap[v.addressBy];
+      }
+    });
+  }
+
+  static getFeeWallet(addressBy) {
+    let feeWallet = this.feeWalletMap[addressBy];
+    if (!feeWallet) {
+      feeWallet = this.defaultFeeWallet;
+    }
+    return feeWallet;
+  }
+
+  static getDustThreshold(lockingScriptSize) {
+    return 3 * Math.ceil((250 * (lockingScriptSize + 9 + 148)) / 1000);
   }
 
   static async postTokenApi(route, param) {
@@ -35,57 +69,72 @@ class FtMgr {
    * @param {number} decimalNum the token amount decimal number.1 bytes
    * @returns
    */
-  static async genesis(tokenName, tokenSymbol, decimalNum) {
-    const utxoPrivateKey = this.privateKey;
+  static async genesis(genesisWif, tokenName, tokenSymbol, decimalNum) {
+    const issuerPrivateKey = new bsv.PrivateKey.fromWIF(genesisWif);
+    const issuerPublicKey = bsv.PublicKey.fromPrivateKey(issuerPrivateKey);
+    const issuerAddress = issuerPrivateKey.toAddress(this.network);
+
+    const feeWallet = this.getFeeWallet(issuerAddress.toString());
+
+    const utxoPrivateKey = feeWallet.privateKey;
     const utxoPublicKey = bsv.PublicKey.fromPrivateKey(utxoPrivateKey);
     const utxoAddress = utxoPrivateKey.toAddress(this.network);
 
-    const issuerPrivateKey = this.privateKey;
-    const issuerPublicKey = bsv.PublicKey.fromPrivateKey(issuerPrivateKey);
+    const estimateSatoshis = BASE_FEE;
+    return await feeWallet.tryUseUtxos(estimateSatoshis, async (utxos) => {
+      let preTxHex = await this.blockChainApi.getRawTxData(utxos[0].txId);
 
-    let utxos = await this.blockChainApi.getUnspents(utxoAddress);
-    let preTxHex = await this.blockChainApi.getRawTxData(utxos[0].txId);
+      let { raw, outputs, sigtype } = await this.postTokenApi("/genesis", {
+        issuerPk: toHex(issuerPublicKey),
+        tokenName,
+        tokenSymbol,
+        decimalNum,
+        utxos,
+        utxoAddress: toHex(utxoAddress),
+        feeb: this.feeb,
+        network: this.network,
+      });
 
-    let { raw, outputs, sigtype } = await this.postTokenApi("/genesis", {
-      issuerPk: toHex(issuerPublicKey),
-      tokenName,
-      tokenSymbol,
-      decimalNum,
-      utxos,
-      utxoAddress: toHex(utxoAddress),
-      feeb: this.feeb,
-      network: this.network,
+      let tx = genSignedTx(
+        raw,
+        outputs,
+        sigtype,
+        issuerPrivateKey,
+        utxoPrivateKey
+      );
+      let txid = await this.blockChainApi.broadcast(tx.serialize());
+
+      //save genesis info
+      await IssuerDao.insertIssuer({
+        genesisId: txid,
+        genesisTxId: txid,
+        genesisOutputIndex: 0,
+        preTxId: utxos[0].txId,
+        preOutputIndex: utxos[0].outputIndex,
+        preTxHex,
+        txId: tx.id,
+        outputIndex: 0,
+        txHex: tx.serialize(),
+        tokenName,
+        tokenSymbol,
+        decimalNum,
+      });
+
+      console.log("genesis success", txid);
+
+      await feeWallet.addUtxos([
+        {
+          txId: txid,
+          satoshis: tx.outputs[tx.outputs.length - 1].satoshis,
+          outputIndex: tx.outputs.length - 1,
+          rootHeight: Date.now(),
+        },
+      ]);
+
+      return {
+        genesisId: txid,
+      };
     });
-
-    let tx = genSignedTx(
-      raw,
-      outputs,
-      sigtype,
-      issuerPrivateKey,
-      utxoPrivateKey
-    );
-    let txid = await this.blockChainApi.broadcast(tx.serialize());
-
-    //save genesis info
-    await IssuerDao.insertIssuer({
-      genesisId: txid,
-      genesisTxId: txid,
-      genesisOutputIndex: 0,
-      preTxId: utxos[0].txId,
-      preOutputIndex: utxos[0].outputIndex,
-      preTxHex,
-      txId: tx.id,
-      outputIndex: 0,
-      txHex: tx.serialize(),
-      tokenName,
-      tokenSymbol,
-      decimalNum,
-    });
-
-    console.log("genesis success", txid);
-    return {
-      genesisId: txid,
-    };
   }
 
   /**
@@ -96,14 +145,20 @@ class FtMgr {
    * @param {string} allowIncreaseIssues 是否允许继续增发
    * @returns
    */
-  static async issue(genesisId, tokenAmount, address, allowIncreaseIssues) {
-    const utxoPrivateKey = this.privateKey;
-    const utxoAddress = utxoPrivateKey.toAddress(this.network);
-
-    const issuerPrivateKey = this.privateKey;
+  static async issue(
+    genesisWif,
+    genesisId,
+    tokenAmount,
+    address,
+    allowIncreaseIssues
+  ) {
+    const issuerPrivateKey = new bsv.PrivateKey(genesisWif);
     const issuerPublicKey = bsv.PublicKey.fromPrivateKey(issuerPrivateKey);
+    const issuerAddress = issuerPrivateKey.toAddress(this.network);
 
-    let utxos = await this.blockChainApi.getUnspents(utxoAddress);
+    const feeWallet = this.getFeeWallet(issuerAddress.toString());
+    const utxoPrivateKey = feeWallet.privateKey;
+    const utxoAddress = utxoPrivateKey.toAddress(this.network);
 
     let issuer = await IssuerDao.getIssuer(genesisId);
     const genesisTxId = issuer.genesisTxId;
@@ -116,73 +171,89 @@ class FtMgr {
     const spendByOutputIndex = issuer.outputIndex;
     const spendByTxHex = issuer.txHex;
     const receiverAddress = bsv.Address.fromString(address, this.network);
-    let { raw, outputs, sigtype } = await this.postTokenApi("/issue", {
-      genesisTxId,
-      genesisOutputIndex,
-      preUtxoTxId,
-      preUtxoOutputIndex,
-      preUtxoTxHex,
-      spendByTxId,
-      spendByOutputIndex,
-      spendByTxHex,
 
-      issuerPk: toHex(issuerPublicKey),
-      receiverAddress: toHex(receiverAddress),
-      tokenAmount,
-      allowIncreaseIssues,
-      oracleSelecteds: [0, 1],
+    const estimateSatoshis =
+      (SIZE_OF_TOKEN * 2 + SIZE_OF_TOKEN + SIZE_OF_TOKEN) * this.feeb +
+      this.getDustThreshold(SIZE_OF_TOKEN);
+    return await feeWallet.tryUseUtxos(estimateSatoshis, async (utxos) => {
+      let { raw, outputs, sigtype } = await this.postTokenApi("/issue", {
+        genesisTxId,
+        genesisOutputIndex,
+        preUtxoTxId,
+        preUtxoOutputIndex,
+        preUtxoTxHex,
+        spendByTxId,
+        spendByOutputIndex,
+        spendByTxHex,
 
-      utxos,
-      utxoAddress: toHex(utxoAddress),
-      feeb: this.feeb,
-      network: this.network,
-    });
-
-    let tx = genSignedTx(
-      raw,
-      outputs,
-      sigtype,
-      issuerPrivateKey,
-      utxoPrivateKey
-    );
-    let txid = await this.blockChainApi.broadcast(tx.serialize());
-
-    //更新发行合约信息
-    IssuerDao.updateIssuer(genesisId, {
-      genesisTxId: tx.id,
-      genesisOutputIndex: 0,
-      preTxId: issuer.txId,
-      preTxHex: issuer.txHex,
-      preOutputIndex: issuer.outputIndex,
-      txId: tx.id,
-      outputIndex: 0,
-      txHex: tx.serialize(),
-    });
-
-    //保存产出的token合约UTXO的信息
-    FungibleTokenDao.addUtxos(address, [
-      {
-        genesisId,
-        txId: txid,
-        satoshis: tx.outputs[1].satoshis,
-        outputIndex: 1, //固定在1号位
-        rootHeight: 0,
-        lockingScript: tx.outputs[1].script.toHex(),
-        txHex: tx.serialize(),
-        tokenAddress: address,
+        issuerPk: toHex(issuerPublicKey),
+        receiverAddress: toHex(receiverAddress),
         tokenAmount,
-        preTxId: spendByTxId,
-        preOutputIndex: spendByOutputIndex,
-        preTxHex: spendByTxHex,
-        preTokenAddress: address,
-        preTokenAmount: 0,
-      },
-    ]);
+        allowIncreaseIssues,
+        signerSelecteds: [0, 1],
 
-    console.log("issue success", txid);
-    return {
-      txId: txid,
-    };
+        utxos,
+        utxoAddress: toHex(utxoAddress),
+        feeb: this.feeb,
+        network: this.network,
+      });
+
+      let tx = genSignedTx(
+        raw,
+        outputs,
+        sigtype,
+        issuerPrivateKey,
+        utxoPrivateKey
+      );
+      let txid = await this.blockChainApi.broadcast(tx.serialize());
+
+      //更新发行合约信息
+      IssuerDao.updateIssuer(genesisId, {
+        genesisTxId: tx.id,
+        genesisOutputIndex: 0,
+        preTxId: issuer.txId,
+        preTxHex: issuer.txHex,
+        preOutputIndex: issuer.outputIndex,
+        txId: tx.id,
+        outputIndex: 0,
+        txHex: tx.serialize(),
+      });
+
+      let tokenOutputIndex = allowIncreaseIssues ? 1 : 0;
+      //保存产出的token合约UTXO的信息
+      FungibleTokenDao.addUtxos(address, [
+        {
+          genesisId,
+          txId: txid,
+          satoshis: tx.outputs[tokenOutputIndex].satoshis,
+          outputIndex: tokenOutputIndex,
+          rootHeight: 0,
+          lockingScript: tx.outputs[tokenOutputIndex].script.toHex(),
+          txHex: tx.serialize(),
+          tokenAddress: address,
+          tokenAmount,
+          preTxId: spendByTxId,
+          preOutputIndex: spendByOutputIndex,
+          preTxHex: spendByTxHex,
+          preTokenAddress: address,
+          preTokenAmount: 0,
+        },
+      ]);
+
+      console.log("issue success", txid);
+
+      await feeWallet.addUtxos([
+        {
+          txId: txid,
+          satoshis: tx.outputs[tx.outputs.length - 1].satoshis,
+          outputIndex: tx.outputs.length - 1,
+          rootHeight: Date.now(),
+        },
+      ]);
+      return {
+        txId: txid,
+      };
+    });
   }
   /**
    * 转移token
@@ -192,11 +263,13 @@ class FtMgr {
    * @returns
    */
   static async transfer(genesisId, senderWif, receivers) {
-    const utxoPrivateKey = this.privateKey;
-    const utxoAddress = utxoPrivateKey.toAddress(this.net);
-
     const senderPrivateKey = new bsv.PrivateKey.fromWIF(senderWif);
     const senderPublicKey = bsv.PublicKey.fromPrivateKey(senderPrivateKey);
+    const senderAddress = senderPrivateKey.toAddress(this.network);
+    const feeWallet = this.getFeeWallet(senderAddress.toString());
+
+    const utxoPrivateKey = feeWallet.privateKey;
+    const utxoAddress = utxoPrivateKey.toAddress(this.network);
 
     let tokenOutputArray = receivers.map((v) => ({
       address: bsv.Address.fromString(v.address, this.network),
@@ -217,12 +290,14 @@ class FtMgr {
     for (let i = 0; i < _ftUtxos.length; i++) {
       let ftUtxo = _ftUtxos[i];
       ftUtxos.push(ftUtxo);
+      console.log(`input ft: ${ftUtxo.txId} ${ftUtxo.outputIndex}`);
       inputTokenAmountSum += BigInt(ftUtxo.tokenAmount);
       if (inputTokenAmountSum >= outputTokenAmountSum) {
         break;
       }
     }
 
+    console.log(inputTokenAmountSum);
     if (inputTokenAmountSum < outputTokenAmountSum) {
       throw "insufficent token";
     }
@@ -236,116 +311,312 @@ class FtMgr {
     }
 
     let routeCheckType;
-    if (ftUtxos.length <= 3) {
-      if (tokenOutputArray.length <= 3) {
+    let inputLength = ftUtxos.length;
+    let outputLength = tokenOutputArray.length;
+    let sizeOfRouteCheck = 0;
+    if (inputLength <= 3) {
+      if (outputLength <= 3) {
         routeCheckType = ROUTE_CHECK_TYPE_3To3;
-      } else if (tokenOutputArray.length <= 100) {
+        sizeOfRouteCheck = SIZE_OF_ROUTE_CHECK_TYPE_3To3;
+      } else if (outputLength <= 100) {
         routeCheckType = ROUTE_CHECK_TYPE_3To100;
+        sizeOfRouteCheck = SIZE_OF_ROUTE_CHECK_TYPE_3To100;
       } else {
-        throw "unsupport token output count";
+        throw `unsupport transfer from inputs(${inputLength}) to outputs(${outputLength})`;
       }
-    } else if (ftUtxos.length <= 6) {
-      if (tokenOutputArray.length <= 6) {
+    } else if (inputLength <= 6) {
+      if (outputLength <= 6) {
         routeCheckType = ROUTE_CHECK_TYPE_6To6;
+        sizeOfRouteCheck = SIZE_OF_ROUTE_CHECK_TYPE_6To6;
       } else {
-        throw "unsupport token output count";
+        throw `unsupport transfer from inputs(${inputLength}) to outputs(${outputLength})`;
       }
-    } else if (ftUtxos.length <= 10) {
-      if (tokenOutputArray.length <= 10) {
+    } else if (inputLength <= 10) {
+      if (outputLength <= 10) {
         routeCheckType = ROUTE_CHECK_TYPE_10To10;
+        sizeOfRouteCheck = SIZE_OF_ROUTE_CHECK_TYPE_10To10;
       } else {
-        throw "unsupport token output count";
+        throw `unsupport transfer from inputs(${inputLength}) to outputs(${outputLength})`;
       }
-    } else if (ftUtxos.length <= 20) {
-      if (tokenOutputArray.length <= 3) {
+    } else if (inputLength <= 20) {
+      if (outputLength <= 3) {
         routeCheckType = ROUTE_CHECK_TYPE_20To3;
+        sizeOfRouteCheck = SIZE_OF_ROUTE_CHECK_TYPE_20To3;
       } else {
-        throw "unsupport token output count";
+        throw `unsupport transfer from inputs(${inputLength}) to outputs(${outputLength})`;
       }
     } else {
-      throw "unsupport token input count";
+      await this.merge(genesisId, senderWif);
+      throw "please try again later";
     }
+    let routeCheckTx;
+    let estimateSatoshis =
+      sizeOfRouteCheck * this.feeb +
+      this.getDustThreshold(sizeOfRouteCheck) +
+      BASE_UTXO_FEE;
+    await feeWallet.tryUseUtxos(estimateSatoshis, async (utxos) => {
+      let _res = await this.postTokenApi("/routeCheck", {
+        senderPk: toHex(senderPublicKey),
+        receivers,
+        ftUtxos,
+        routeCheckType,
+        signerSelecteds: [0, 1],
 
-    let utxos = await this.blockChainApi.getUnspents(utxoAddress);
-    let _res = await this.postTokenApi("/routeCheck", {
-      senderPk: toHex(senderPublicKey),
-      receivers,
-      ftUtxos,
-      routeCheckType: ROUTE_CHECK_TYPE_3To3,
-      oracleSelecteds: [0, 1],
-
-      utxos,
-      utxoAddress: toHex(utxoAddress),
-      feeb: this.feeb,
-      network: this.network,
-    });
-    let routeCheckTx = genSignedTx(
-      _res.raw,
-      _res.outputs,
-      _res.sigtype,
-      senderPrivateKey,
-      utxoPrivateKey
-    );
-    await this.blockChainApi.broadcast(routeCheckTx.serialize());
-    console.log("send routeCheckTx success", routeCheckTx.id);
-
-    utxos = await this.blockChainApi.getUnspents(utxoAddress);
-    _res = await this.postTokenApi("/transfer", {
-      senderPk: toHex(senderPublicKey),
-      receivers,
-      ftUtxos,
-      routeCheckType: ROUTE_CHECK_TYPE_3To3,
-      routeCheckHex: routeCheckTx.serialize(),
-      oracleSelecteds: [0, 1],
-
-      utxos,
-      utxoAddress: toHex(utxoAddress),
-      feeb: this.feeb,
-      network: this.network,
-    });
-    let tx = genSignedTx(
-      _res.raw,
-      _res.outputs,
-      _res.sigtype,
-      senderPrivateKey,
-      utxoPrivateKey
-    );
-    let txid = await this.blockChainApi.broadcast(tx.serialize());
-    console.log("send transfer success", txid);
-
-    //db更新token合约UTXO的信息
-    tokenOutputArray.forEach((v, index) => {
-      FungibleTokenDao.addUtxos(v.address.toString(), [
+        utxos,
+        utxoAddress: toHex(utxoAddress),
+        feeb: this.feeb,
+        network: this.network,
+      });
+      let tx = genSignedTx(
+        _res.raw,
+        _res.outputs,
+        _res.sigtype,
+        senderPrivateKey,
+        utxoPrivateKey
+      );
+      await this.blockChainApi.broadcast(tx.serialize());
+      console.log("send routeCheckTx success", tx.id);
+      routeCheckTx = tx;
+      await feeWallet.addUtxos([
         {
-          genesisId,
-          txId: txid,
-          satoshis: tx.outputs[index].satoshis,
-          outputIndex: index,
-          rootHeight: 0,
-          lockingScript: tx.outputs[index].script.toHex(),
-          tokenAddress: v.address.toString(),
-          tokenAmount: v.tokenAmount,
-          txHex: tx.serialize(),
-          preTxId: ftUtxos[0].txId,
-          preOutputIndex: ftUtxos[0].outputIndex,
-          preTxHex: ftUtxos[0].txHex,
-          preTokenAddress: ftUtxos[0].tokenAddress,
-          preTokenAmount: ftUtxos[0].tokenAmount,
+          txId: tx.id,
+          satoshis: tx.outputs[tx.outputs.length - 1].satoshis,
+          outputIndex: tx.outputs.length - 1,
+          rootHeight: Date.now(),
         },
       ]);
     });
 
-    ftUtxos.forEach((v) => {
-      FungibleTokenDao.removeUtxo(
-        senderPrivateKey.toAddress(this.network).toString(),
-        v.txId,
-        v.outputIndex
+    estimateSatoshis =
+      (sizeOfRouteCheck +
+        SIZE_OF_TOKEN * inputLength +
+        SIZE_OF_TOKEN * inputLength * 2 +
+        SIZE_OF_TOKEN * outputLength) *
+        this.feeb +
+      this.getDustThreshold(SIZE_OF_TOKEN) * outputLength -
+      this.getDustThreshold(SIZE_OF_TOKEN) * inputLength -
+      this.getDustThreshold(sizeOfRouteCheck) +
+      BASE_UTXO_FEE;
+    return await feeWallet.tryUseUtxos(estimateSatoshis, async (utxos) => {
+      let _res = await this.postTokenApi("/transfer", {
+        senderPk: toHex(senderPublicKey),
+        receivers,
+        ftUtxos,
+        routeCheckType: ROUTE_CHECK_TYPE_3To3,
+        routeCheckHex: routeCheckTx.serialize(),
+        signerSelecteds: [0, 1],
+
+        utxos,
+        utxoAddress: toHex(utxoAddress),
+        feeb: this.feeb,
+        network: this.network,
+      });
+      let tx = genSignedTx(
+        _res.raw,
+        _res.outputs,
+        _res.sigtype,
+        senderPrivateKey,
+        utxoPrivateKey
       );
+      let txid = await this.blockChainApi.broadcast(tx.serialize(true));
+      console.log("send transfer success", txid);
+
+      //db更新token合约UTXO的信息
+      tokenOutputArray.forEach((v, index) => {
+        FungibleTokenDao.addUtxos(v.address.toString(), [
+          {
+            genesisId,
+            txId: txid,
+            satoshis: tx.outputs[index].satoshis,
+            outputIndex: index,
+            rootHeight: 0,
+            lockingScript: tx.outputs[index].script.toHex(),
+            tokenAddress: v.address.toString(),
+            tokenAmount: v.tokenAmount.toString(),
+            txHex: tx.serialize(),
+            preTxId: ftUtxos[0].txId,
+            preOutputIndex: ftUtxos[0].outputIndex,
+            preTxHex: ftUtxos[0].txHex,
+            preTokenAddress: ftUtxos[0].tokenAddress,
+            preTokenAmount: ftUtxos[0].tokenAmount,
+          },
+        ]);
+      });
+
+      ftUtxos.forEach((v) => {
+        FungibleTokenDao.removeUtxo(
+          senderPrivateKey.toAddress(this.network).toString(),
+          v.txId,
+          v.outputIndex
+        );
+      });
+
+      await feeWallet.addUtxos([
+        {
+          txId: tx.id,
+          satoshis: tx.outputs[tx.outputs.length - 1].satoshis,
+          outputIndex: tx.outputs.length - 1,
+          rootHeight: Date.now(),
+        },
+      ]);
+
+      return {
+        txId: txid,
+      };
+    });
+  }
+
+  static async merge(genesisId, senderWif) {
+    const senderPrivateKey = new bsv.PrivateKey.fromWIF(senderWif);
+    const senderPublicKey = bsv.PublicKey.fromPrivateKey(senderPrivateKey);
+    const senderAddress = senderPrivateKey.toAddress(this.network);
+
+    const feeWallet = this.getFeeWallet(senderAddress.toString());
+    const utxoPrivateKey = feeWallet.privateKey;
+    const utxoAddress = utxoPrivateKey.toAddress(this.network);
+
+    let _ftUtxos = await FungibleTokenDao.getUtxos(
+      senderPrivateKey.toAddress(this.network).toString(),
+      genesisId
+    );
+    let ftUtxos = _ftUtxos.slice(0, 20);
+
+    let inputTokenAmountSum = 0n;
+    for (let i = 0; i < ftUtxos.length; i++) {
+      let ftUtxo = ftUtxos[i];
+      inputTokenAmountSum += BigInt(ftUtxo.tokenAmount);
+    }
+
+    let tokenOutputArray = [
+      {
+        address: senderAddress,
+        tokenAmount: inputTokenAmountSum,
+      },
+    ];
+
+    let receivers = tokenOutputArray.map((v) => ({
+      address: v.address.toString(),
+      amount: v.tokenAmount.toString(),
+    }));
+
+    let routeCheckType = ROUTE_CHECK_TYPE_20To3;
+    let sizeOfRouteCheck = SIZE_OF_ROUTE_CHECK_TYPE_20To3;
+    let routeCheckTx;
+    let estimateSatoshis =
+      sizeOfRouteCheck * this.feeb +
+      this.getDustThreshold(sizeOfRouteCheck) +
+      BASE_UTXO_FEE;
+    await feeWallet.tryUseUtxos(estimateSatoshis, async (utxos) => {
+      let _res = await this.postTokenApi("/routeCheck", {
+        senderPk: toHex(senderPublicKey),
+        receivers,
+        ftUtxos,
+        routeCheckType,
+        signerSelecteds: [0, 1],
+
+        utxos,
+        utxoAddress: toHex(utxoAddress),
+        feeb: this.feeb,
+        network: this.network,
+      });
+      let tx = genSignedTx(
+        _res.raw,
+        _res.outputs,
+        _res.sigtype,
+        senderPrivateKey,
+        utxoPrivateKey
+      );
+      await this.blockChainApi.broadcast(tx.serialize());
+      console.log("send routeCheckTx success", tx.id);
+
+      await feeWallet.addUtxos([
+        {
+          txId: tx.id,
+          satoshis: tx.outputs[tx.outputs.length - 1].satoshis,
+          outputIndex: tx.outputs.length - 1,
+          rootHeight: Date.now(),
+        },
+      ]);
+      routeCheckTx = tx;
     });
 
-    return {
-      txId: txid,
-    };
+    estimateSatoshis =
+      (sizeOfRouteCheck +
+        SIZE_OF_TOKEN * inputLength +
+        SIZE_OF_TOKEN * inputLength * 2 +
+        SIZE_OF_TOKEN * outputLength) *
+        this.feeb +
+      this.getDustThreshold(SIZE_OF_TOKEN) * outputLength -
+      this.getDustThreshold(SIZE_OF_TOKEN) * inputLength -
+      this.getDustThreshold(sizeOfRouteCheck) +
+      BASE_UTXO_FEE;
+    return await feeWallet.tryUseUtxos(estimateSatoshis, async (utxos) => {
+      _res = await this.postTokenApi("/transfer", {
+        senderPk: toHex(senderPublicKey),
+        receivers,
+        ftUtxos,
+        routeCheckType,
+        routeCheckHex: routeCheckTx.serialize(),
+        signerSelecteds: [0, 1],
+
+        utxos,
+        utxoAddress: toHex(utxoAddress),
+        feeb: this.feeb,
+        network: this.network,
+      });
+      let tx = genSignedTx(
+        _res.raw,
+        _res.outputs,
+        _res.sigtype,
+        senderPrivateKey,
+        utxoPrivateKey
+      );
+      let txid = await this.blockChainApi.broadcast(tx.serialize());
+      console.log("send transfer success", txid);
+
+      //db更新token合约UTXO的信息
+      tokenOutputArray.forEach((v, index) => {
+        FungibleTokenDao.addUtxos(v.address.toString(), [
+          {
+            genesisId,
+            txId: txid,
+            satoshis: tx.outputs[index].satoshis,
+            outputIndex: index,
+            rootHeight: 0,
+            lockingScript: tx.outputs[index].script.toHex(),
+            tokenAddress: v.address.toString(),
+            tokenAmount: v.tokenAmount.toString(),
+            txHex: tx.serialize(),
+            preTxId: ftUtxos[0].txId,
+            preOutputIndex: ftUtxos[0].outputIndex,
+            preTxHex: ftUtxos[0].txHex,
+            preTokenAddress: ftUtxos[0].tokenAddress,
+            preTokenAmount: ftUtxos[0].tokenAmount.toString(),
+          },
+        ]);
+      });
+
+      ftUtxos.forEach((v) => {
+        FungibleTokenDao.removeUtxo(
+          senderPrivateKey.toAddress(this.network).toString(),
+          v.txId,
+          v.outputIndex
+        );
+      });
+
+      await feeWallet.addUtxos([
+        {
+          txId: tx.id,
+          satoshis: tx.outputs[tx.outputs.length - 1].satoshis,
+          outputIndex: tx.outputs.length - 1,
+          rootHeight: Date.now(),
+        },
+      ]);
+
+      return {
+        txId: txid,
+      };
+    });
   }
 }
 

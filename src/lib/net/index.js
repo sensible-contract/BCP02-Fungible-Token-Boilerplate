@@ -13,7 +13,7 @@ class Net {
     const reqData = {
       uri: url,
       method: "GET",
-      timeout: 20000,
+      timeout: 60000,
     };
     const handlerCallback = (resolve, reject) => {
       request(reqData, function (err, res, body) {
@@ -64,7 +64,7 @@ class Net {
     config = config || {};
     let { contentType, timeout, authorization } = config;
     contentType = contentType || "json";
-    timeout = timeout || 20000;
+    timeout = timeout || 60000;
 
     if (contentType == "urlencoded") {
       let arr = [];

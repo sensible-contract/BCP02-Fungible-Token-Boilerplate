@@ -17,11 +17,13 @@ class NetMgr {
       const run = async () => {
         let code = ErrCode.EC_OK;
         let data = {};
+        let msg = "";
         try {
           data = await func(req, res, params, body);
         } catch (e) {
           if (e instanceof CodeError) {
             code = e.code;
+            msg = e.message;
             console.error(e.message);
           } else {
             code = ErrCode.EC_INNER_ERROR;
@@ -31,6 +33,7 @@ class NetMgr {
           res.json({
             code,
             data,
+            msg,
           });
         }
       };
