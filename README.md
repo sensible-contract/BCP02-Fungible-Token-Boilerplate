@@ -17,27 +17,36 @@ npm install
 - run a <a href="https://github.com/sensible-contract/BCP02-Fungible-Token-Composer">BCP02-Fungible-Token-Composer</a> node
 - node version > 12.0.0
 
+Generate a private key
+
+```
+node tools/generateWif.js
+```
+
 Here is a example for config
 
 ```
-
+replace the "xxxxxxx" in ft.json with the generated wif above
+(you may send some BSV to the address)
 src/config/ft.json
 {
   "default": {
-    "wif": "cN2gor4vF2eQ1PmzTzJEwps6uvTK4QToUgTxGHN1xUxZ34djL8vR",
-    "apiTarget": "whatsonchain",
-    "network": "testnet",
-    "feeb": 0.5,
-    "tokenApiPrefix": "http://127.0.0.1:8091"
-  },
-  "production": {
-    "wif": "",
+    "feeWallets": [
+      {
+        "addressBy": "",
+        "wif": "xxxxxxxx",
+        "unitSatoshis": 100000
+      }
+    ],
     "apiTarget": "metasv",
     "network": "mainnet",
     "feeb": 0.5,
-    "tokenApiPrefix": "http://127.0.0.1:8091"
-  }
+    "tokenApiPrefix": "http://127.0.0.1:8093"
+  },
+  ...
 }
+
+
 
 ```
 
@@ -69,6 +78,7 @@ node src/app.js env=production
 
 | param       | required | type         | note     |
 | ----------- | -------- | ------------ | -------- |
+| genesisWif  | true     | string       |          |
 | tokenName   | true     | string       | 20 bytes |
 | tokenSymbol | true     | string       | 10 bytes |
 | decimalNum  | true     | unsigned int | 1 bytes  |
@@ -77,10 +87,11 @@ node src/app.js env=production
 
 ```shell
 curl -X POST  -H "Content-Type: application/json" --data '{
-    "tokenName":"ENJIN",
-    "tokenSymbol":"ENJ",
-    "decimal":2
-}' http://127.0.0.1:8092/api/ft/genesis
+    "genesisWif":"xxxxxxxxxxxxxxxxxxx",
+    "tokenName":"OVTS",
+    "tokenSymbol":"OVTS",
+    "decimalNum":3
+}' http://127.0.0.1:8094/api/ft/genesis
 ```
 
 - rsp
@@ -90,7 +101,7 @@ curl -X POST  -H "Content-Type: application/json" --data '{
   "code": 0,
   "msg": "",
   "data": {
-    "genesisId": "1ee411ab7e23a1f60513a332dd6f593acf1118d2354795c501188dcc0f72a492"
+    "genesisId": "8594ed2dfdac4d6664116ccb85ba2d8e1c805a193453ace39155eeeeb66e70fb"
   }
 }
 ```
@@ -99,22 +110,23 @@ curl -X POST  -H "Content-Type: application/json" --data '{
 
 - params
 
-| param               | required | type           | note                 |
-| ------------------- | -------- | -------------- | -------------------- |
-| genesisId           | true     | string         | genesisId            |
-| tokenAmount         | true     | unsigned int64 | token amount         |
-| receiverAddress     | true     | string         | receiver address     |
-| allowIncreaseIssues | true     | bool           | allow to issue again |
+| param               | required | type           | note                       |
+| ------------------- | -------- | -------------- | -------------------------- |
+| genesisId           | true     | string         | come from the genesis step |
+| tokenAmount         | true     | unsigned int64 | token amount               |
+| receiverAddress     | true     | string         | receiver address           |
+| allowIncreaseIssues | true     | bool           | allow to issue again       |
 
 - req
 
 ```shell
 curl -X POST -H "Content-Type: application/json" --data '{
-    "genesisId":"1ee411ab7e23a1f60513a332dd6f593acf1118d2354795c501188dcc0f72a492",
-    "tokenAmount":"100",
-    "receiverAddress":"1MzEyAMS3eM63gMcc9AVjZSEu4j3KYpBVQ",
-    "        allowIncreaseIssues":true
-}' http://127.0.0.1:8092/api/ft/issue
+    "genesisWif":"xxxxxxxxxxxxxxx",
+    "genesisId":"8594ed2dfdac4d6664116ccb85ba2d8e1c805a193453ace39155eeeeb66e70fb",
+    "tokenAmount":"1000000000000",
+    "receiverAddress":"1GQwTKcQDcAaTwRN8wWLKGZCuxugDQ49dj",
+    "allowIncreaseIssues":false
+}' http://127.0.0.1:8094/api/ft/issue
 ```
 
 - rsp
@@ -135,7 +147,7 @@ curl -X POST -H "Content-Type: application/json" --data '{
 
 | param     | required | type   | note                               |
 | --------- | -------- | ------ | ---------------------------------- |
-| genesisId | true     | string | genesisId                          |
+| genesisId | true     | string | come from the genesis step         |
 | senderWif | true     | string | sender wif                         |
 | receivers | true     | array  | [{amount:"xxx",address:'xxx'},...] |
 
@@ -143,16 +155,14 @@ curl -X POST -H "Content-Type: application/json" --data '{
 
 ```shell
 curl -X POST -H "Content-Type: application/json" --data '{
-    "genesisId":"1ee411ab7e23a1f60513a332dd6f593acf1118d2354795c501188dcc0f72a492",
-    "senderWif":"L2YWukZEh9b7wLMLRrZWnaEZCHaTMXnQAH75ZuvhrTvAeFa6vxMM",
+    "genesisId":"8594ed2dfdac4d6664116ccb85ba2d8e1c805a193453ace39155eeeeb66e70fb",
+    "senderWif":"xxxxxxxxxxxxxx",
     "receivers":[{
-    	"address":"1MzEyAMS3eM63gMcc9AVjZSEu4j3KYpBVQ",
-    	"amount":"1"
-    },{
-    	"address":"1MzEyAMS3eM63gMcc9AVjZSEu4j3KYpBVQ",
-    	"amount":"2"
+    	"address":"1GQwTKcQDcAaTwRN8wWLKGZCuxugDQ49dj",
+    	"amount":"10000"
     }]
-}' http://127.0.0.1:8092/api/ft/transfer
+}' http://127.0.0.1:8094/api/ft/transfer
+
 ```
 
 - rsp
