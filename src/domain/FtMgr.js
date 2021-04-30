@@ -83,14 +83,17 @@ class FtMgr {
     const estimateSatoshis = BASE_FEE;
     return await feeWallet.tryUseUtxos(estimateSatoshis, async (utxos) => {
       let preTxHex = await this.blockChainApi.getRawTxData(utxos[0].txId);
-
+      utxos.forEach((utxo) => {
+        utxo.address = toHex(utxoAddress);
+      });
+      let utxoPrivateKeys = utxos.map((v) => utxoPrivateKey);
       let { raw, outputs, sigtype } = await this.postTokenApi("/genesis", {
         issuerPk: toHex(issuerPublicKey),
         tokenName,
         tokenSymbol,
         decimalNum,
         utxos,
-        utxoAddress: toHex(utxoAddress),
+        changeAddress: toHex(utxoAddress),
         feeb: this.feeb,
         network: this.network,
       });
@@ -100,7 +103,7 @@ class FtMgr {
         outputs,
         sigtype,
         issuerPrivateKey,
-        utxoPrivateKey
+        utxoPrivateKeys
       );
       let txid = await this.blockChainApi.broadcast(tx.serialize());
 
@@ -176,6 +179,10 @@ class FtMgr {
       (SIZE_OF_TOKEN * 2 + SIZE_OF_TOKEN + SIZE_OF_TOKEN) * this.feeb +
       this.getDustThreshold(SIZE_OF_TOKEN);
     return await feeWallet.tryUseUtxos(estimateSatoshis, async (utxos) => {
+      utxos.forEach((utxo) => {
+        utxo.address = toHex(utxoAddress);
+      });
+      let utxoPrivateKeys = utxos.map((v) => utxoPrivateKey);
       let { raw, outputs, sigtype } = await this.postTokenApi("/issue", {
         genesisTxId,
         genesisOutputIndex,
@@ -193,7 +200,7 @@ class FtMgr {
         signerSelecteds: [0, 1],
 
         utxos,
-        utxoAddress: toHex(utxoAddress),
+        changeAddress: toHex(utxoAddress),
         feeb: this.feeb,
         network: this.network,
       });
@@ -203,7 +210,7 @@ class FtMgr {
         outputs,
         sigtype,
         issuerPrivateKey,
-        utxoPrivateKey
+        utxoPrivateKeys
       );
       let txid = await this.blockChainApi.broadcast(tx.serialize());
 
@@ -355,6 +362,10 @@ class FtMgr {
       this.getDustThreshold(sizeOfRouteCheck) +
       BASE_UTXO_FEE;
     await feeWallet.tryUseUtxos(estimateSatoshis, async (utxos) => {
+      utxos.forEach((utxo) => {
+        utxo.address = toHex(utxoAddress);
+      });
+      let utxoPrivateKeys = utxos.map((v) => utxoPrivateKey);
       let _res = await this.postTokenApi("/routeCheck", {
         senderPk: toHex(senderPublicKey),
         receivers,
@@ -363,16 +374,17 @@ class FtMgr {
         signerSelecteds: [0, 1],
 
         utxos,
-        utxoAddress: toHex(utxoAddress),
+        changeAddress: toHex(utxoAddress),
         feeb: this.feeb,
         network: this.network,
       });
+
       let tx = genSignedTx(
         _res.raw,
         _res.outputs,
         _res.sigtype,
         senderPrivateKey,
-        utxoPrivateKey
+        utxoPrivateKeys
       );
       await this.blockChainApi.broadcast(tx.serialize());
       console.log("send routeCheckTx success", tx.id);
@@ -398,16 +410,20 @@ class FtMgr {
       this.getDustThreshold(sizeOfRouteCheck) +
       BASE_UTXO_FEE;
     return await feeWallet.tryUseUtxos(estimateSatoshis, async (utxos) => {
+      utxos.forEach((utxo) => {
+        utxo.address = toHex(utxoAddress);
+      });
+      let utxoPrivateKeys = utxos.map((v) => utxoPrivateKey);
       let _res = await this.postTokenApi("/transfer", {
         senderPk: toHex(senderPublicKey),
         receivers,
         ftUtxos,
-        routeCheckType: ROUTE_CHECK_TYPE_3To3,
+        routeCheckType,
         routeCheckHex: routeCheckTx.serialize(),
         signerSelecteds: [0, 1],
 
         utxos,
-        utxoAddress: toHex(utxoAddress),
+        changeAddress: toHex(utxoAddress),
         feeb: this.feeb,
         network: this.network,
       });
@@ -416,7 +432,7 @@ class FtMgr {
         _res.outputs,
         _res.sigtype,
         senderPrivateKey,
-        utxoPrivateKey
+        utxoPrivateKeys
       );
       let txid = await this.blockChainApi.broadcast(tx.serialize(true));
       console.log("send transfer success", txid);
@@ -507,6 +523,10 @@ class FtMgr {
       this.getDustThreshold(sizeOfRouteCheck) +
       BASE_UTXO_FEE;
     await feeWallet.tryUseUtxos(estimateSatoshis, async (utxos) => {
+      utxos.forEach((utxo) => {
+        utxo.address = toHex(utxoAddress);
+      });
+      let utxoPrivateKeys = utxos.map((v) => utxoPrivateKey);
       let _res = await this.postTokenApi("/routeCheck", {
         senderPk: toHex(senderPublicKey),
         receivers,
@@ -524,7 +544,7 @@ class FtMgr {
         _res.outputs,
         _res.sigtype,
         senderPrivateKey,
-        utxoPrivateKey
+        utxoPrivateKeys
       );
       await this.blockChainApi.broadcast(tx.serialize());
       console.log("send routeCheckTx success", tx.id);
@@ -551,6 +571,10 @@ class FtMgr {
       this.getDustThreshold(sizeOfRouteCheck) +
       BASE_UTXO_FEE;
     return await feeWallet.tryUseUtxos(estimateSatoshis, async (utxos) => {
+      utxos.forEach((utxo) => {
+        utxo.address = toHex(utxoAddress);
+      });
+      let utxoPrivateKeys = utxos.map((v) => utxoPrivateKey);
       _res = await this.postTokenApi("/transfer", {
         senderPk: toHex(senderPublicKey),
         receivers,
@@ -560,7 +584,7 @@ class FtMgr {
         signerSelecteds: [0, 1],
 
         utxos,
-        utxoAddress: toHex(utxoAddress),
+        changeAddress: toHex(utxoAddress),
         feeb: this.feeb,
         network: this.network,
       });
@@ -569,7 +593,7 @@ class FtMgr {
         _res.outputs,
         _res.sigtype,
         senderPrivateKey,
-        utxoPrivateKey
+        utxoPrivateKeys
       );
       let txid = await this.blockChainApi.broadcast(tx.serialize());
       console.log("send transfer success", txid);

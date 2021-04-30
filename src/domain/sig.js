@@ -1,5 +1,5 @@
 const { bsv, signTx } = require("scryptlib");
-function genSignedTx(raw, outputs, sigtype, tokenPrivateKey, utxoPrivateKey) {
+function genSignedTx(raw, outputs, sigtype, tokenPrivateKey, utxoPrivateKeys) {
   const tx = new bsv.Transaction(raw);
 
   tx.inputs.forEach((input, inputIndex) => {
@@ -29,6 +29,7 @@ function genSignedTx(raw, outputs, sigtype, tokenPrivateKey, utxoPrivateKey) {
       ]).toString("hex");
       input.setScript(input.script.toHex().replace(oldSigHex, newSigHex));
     } else {
+      let utxoPrivateKey = utxoPrivateKeys.splice(0, 1)[0];
       const sig = new bsv.Transaction.Signature({
         publicKey: utxoPrivateKey.publicKey,
         prevTxId: tx.inputs[inputIndex].prevTxId,
